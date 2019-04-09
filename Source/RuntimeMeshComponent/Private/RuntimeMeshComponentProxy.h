@@ -3,9 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "RuntimeMeshProxy.h"
+#include "RuntimeMeshData.h"
+#include "RuntimeMeshSectionProxy.h"
 
 class UBodySetup;
+class URuntimeMeshComponent;
 
 /** Runtime mesh scene proxy */
 class FRuntimeMeshComponentSceneProxy : public FPrimitiveSceneProxy
@@ -61,4 +63,12 @@ public:
 	{
 		return(FPrimitiveSceneProxy::GetAllocatedSize());
 	}
+
+#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION >= 19
+	SIZE_T GetTypeHash() const override
+	{
+		static size_t UniquePointer;
+		return reinterpret_cast<size_t>(&UniquePointer);
+	}
+#endif
 };

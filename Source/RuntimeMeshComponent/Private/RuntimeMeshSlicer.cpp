@@ -1,7 +1,7 @@
 // Copyright 2016-2018 Chris Conway (Koderz). All Rights Reserved.
 
-#include "RuntimeMeshComponentPlugin.h"
 #include "RuntimeMeshSlicer.h"
+#include "RuntimeMeshComponentPlugin.h"
 #include "GeomTools.h"
 #include "RuntimeMesh.h"
 #include "RuntimeMeshData.h"
@@ -270,9 +270,9 @@ void URuntimeMeshSlicer::SliceRuntimeMeshSection(const FRuntimeMeshDataPtr& InRu
 {
 	bool bShouldCreateOtherHalf = OutOtherHalf.IsValid();
 
-	auto SourceMeshData = InRuntimeMesh->GetReadonlyMeshAccessor(SectionIndex).ToSharedRef();
-	TSharedPtr<FRuntimeMeshBuilder> NewMeshData = MakeRuntimeMeshBuilder(SourceMeshData);
-	TSharedPtr<FRuntimeMeshBuilder> OtherMeshData = bShouldCreateOtherHalf ? MakeRuntimeMeshBuilder(SourceMeshData) : TSharedPtr<FRuntimeMeshBuilder>(nullptr);
+	auto SourceMeshData = InRuntimeMesh->GetSectionReadonly(SectionIndex);
+	TSharedPtr<FRuntimeMeshBuilder> NewMeshData = MakeRuntimeMeshBuilder(*SourceMeshData.Get());
+	TSharedPtr<FRuntimeMeshBuilder> OtherMeshData = bShouldCreateOtherHalf ? MakeRuntimeMeshBuilder(*SourceMeshData.Get()) : TSharedPtr<FRuntimeMeshBuilder>(nullptr);
 
 	// Map of base vert index to sliced vert index
 	TMap<int32, int32> BaseToSlicedVertIndex;
@@ -497,14 +497,14 @@ int32 URuntimeMeshSlicer::CapMeshSlice(const FRuntimeMeshDataPtr& InRuntimeMesh,
 		if (CapOption == ERuntimeMeshSlicerCapOption::UseLastSectionForCap)
 		{
 			CapSectionIndex = InRuntimeMesh->GetLastSectionIndex();
-			auto ExistingMesh = InRuntimeMesh->GetReadonlyMeshAccessor(CapSectionIndex);
-			CapSection = MakeRuntimeMeshBuilder(ExistingMesh.ToSharedRef());
+			auto ExistingMesh = InRuntimeMesh->GetSectionReadonly(NewCapSectionIndex);
+			CapSection = MakeRuntimeMeshBuilder(*ExistingMesh.Get());
 			ExistingMesh->CopyTo(CapSection);
 		}
 		// Adding new section for cap
 		else
 		{
-			CapSection = MakeRuntimeMeshBuilder<FVector, FRuntimeMeshVertexNoPosition, uint16>();
+			CapSection = MakeRuntimeMeshBuilder<FRuntimeMeshTangents, FVector2DHalf, uint16>();
 			CapSectionIndex = NewCapSectionIndex;
 		}
 
@@ -556,14 +556,14 @@ int32 URuntimeMeshSlicer::CapMeshSlice(const FRuntimeMeshDataPtr& InRuntimeMesh,
 			if (CapOption == ERuntimeMeshSlicerCapOption::UseLastSectionForCap)
 			{
 				OtherCapSectionIndex = OutOtherHalf->GetLastSectionIndex();
-				auto ExistingMesh = OutOtherHalf->GetReadonlyMeshAccessor(CapSectionIndex);
-				OtherCapSection = MakeRuntimeMeshBuilder(ExistingMesh.ToSharedRef());
+				auto ExistingMesh = OutOtherHalf->GetSectionReadonly(CapSectionIndex);
+				OtherCapSection = MakeRuntimeMeshBuilder(*ExistingMesh.Get());
 				ExistingMesh->CopyTo(OtherCapSection);
 			}
 			// Adding new section for cap
 			else
 			{
-				OtherCapSection = MakeRuntimeMeshBuilder<FVector, FRuntimeMeshVertexNoPosition, uint16>();
+				OtherCapSection = MakeRuntimeMeshBuilder<FRuntimeMeshTangents, FVector2DHalf, uint16>();
 				OtherCapSectionIndex = NewCapSectionIndex;
 			}
 
@@ -638,7 +638,7 @@ void URuntimeMeshSlicer::SliceRuntimeMesh(URuntimeMesh* InRuntimeMesh, FVector P
 				continue;
 			}
 
-			auto MeshData = InRuntimeMesh->GetReadonlyMeshAccessor(SectionIndex);
+			auto MeshData = InRuntimeMesh->GetSectionReadonly(SectionIndex);
 
 			// Skip if we don't have mesh data
 			if (MeshData->NumVertices() < 3 || MeshData->NumIndices() < 3)
@@ -660,12 +660,13 @@ void URuntimeMeshSlicer::SliceRuntimeMesh(URuntimeMesh* InRuntimeMesh, FVector P
 				// Box totally on the far side of the plane, move the entire section to the other RMC if it exists
 				if (bShouldCreateOtherHalf)
 				{
-					auto SourceMeshData = InRuntimeMesh->GetReadonlyMeshAccessor(SectionIndex).ToSharedRef();
+					auto SourceMeshData = InRuntimeMesh->GetSectionReadonly(SectionIndex);
 
-					auto NewBuilder = MakeRuntimeMeshBuilder(SourceMeshData);
+					auto NewBuilder = MakeRuntimeMeshBuilder(*SourceMeshData.Get());
 					SourceMeshData->CopyTo(NewBuilder);
 
 					OutOtherHalf->CreateMeshSection(SectionIndex, MoveTemp(NewBuilder));
+					OutOtherHalf->SetSectionMaterial(SectionIndex, InRuntimeMesh->GetSectionMaterial(SectionIndex));
 				}
 
 				InRuntimeMesh->ClearMeshSection(SectionIndex);
@@ -727,6 +728,15 @@ void URuntimeMeshSlicer::SliceRuntimeMeshComponent(URuntimeMeshComponent* InRunt
 				OutOtherHalf->SetCollisionProfileName(InRuntimeMesh->GetCollisionProfileName());
 				OutOtherHalf->SetCollisionEnabled(InRuntimeMesh->GetCollisionEnabled());
 				OutOtherHalf->SetCollisionUseComplexAsSimple(InRuntimeMesh->IsCollisionUsingComplexAsSimple());
+
+				// Copy overridden materials
+				for (int32 Index = 0; Index < InRuntimeMesh->GetNumOverrideMaterials(); Index++)
+				{
+					if (UMaterialInterface* Material = InRuntimeMesh->GetOverrideMaterial(Index))
+					{
+						OutOtherHalf->SetMaterial(Index, Material);
+					}
+				}
 
 				OutOtherHalf->RegisterComponent();
 			}

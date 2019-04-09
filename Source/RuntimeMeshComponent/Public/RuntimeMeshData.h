@@ -58,7 +58,7 @@ DECLARE_CYCLE_STAT(TEXT("RM - Serialize Data"), STAT_RuntimeMesh_SerializationOp
 /**
  *
  */
-class RUNTIMEMESHCOMPONENT_API FRuntimeMeshData
+class RUNTIMEMESHCOMPONENT_API FRuntimeMeshData : public TSharedFromThis<FRuntimeMeshData, ESPMode::ThreadSafe>
 {
 	/** Array of sections of mesh */
 	TArray<FRuntimeMeshSectionPtr> MeshSections;
@@ -83,104 +83,54 @@ class RUNTIMEMESHCOMPONENT_API FRuntimeMeshData
 	FRuntimeMeshProxyPtr RenderProxy;
 
 	TUniquePtr<FRuntimeMeshLockProvider> SyncRoot;
-	TFunction<FRuntimeMeshLockProvider*()> LockFactory;
-
-
-
-
+	
 public:
 	FRuntimeMeshData();
 	~FRuntimeMeshData();
 
 private:
-	void CheckCreate(const FRuntimeMeshVertexStreamStructure Stream0Structure,
-		const FRuntimeMeshVertexStreamStructure& Stream1Structure, const FRuntimeMeshVertexStreamStructure& Stream2Structure, bool bIndexIsValid) const;
+	void CheckCreate(int32 NumUVs, bool bIndexIsValid) const;
+
+	void CheckCreateLegacyInternal(const FRuntimeMeshVertexStreamStructure& Stream0Structure, const FRuntimeMeshVertexStreamStructure& Stream1Structure, const FRuntimeMeshVertexStreamStructure& Stream2Structure, bool bIsIndexValid) const;
 
 	template<typename VertexType0, typename VertexType1, typename VertexType2, typename IndexType>
-	void CheckCreate() const
+	void CheckCreateLegacy() const
+	{
+		CheckCreateLegacyInternal(GetStreamStructure<VertexType0>(), GetStreamStructure<VertexType1>(), GetStreamStructure<VertexType2>(), FRuntimeMeshIndexTraits<IndexType>::IsValidIndexType);
+	}
+
+	void CheckUpdate(bool bUseHighPrecisionTangents, bool bUseHighPrecisionUVs, int32 NumUVs, bool b32BitIndices, int32 SectionIndex, bool bShouldCheckIndexType, 
+		bool bCheckTangentVertexStream, bool bCheckUVVertexStream) const;
+
+	template<typename TangentType, typename UVType, typename IndexType>
+	void CheckUpdate(int32 SectionIndex, bool bShouldCheckIndexType, bool bCheckTangentVertexStream, bool bCheckUVVertexStream) const
 	{
 #if DO_CHECK
-		CheckCreate(GetStreamStructure<VertexType0>(), GetStreamStructure<VertexType1>(), GetStreamStructure<VertexType2>(), FRuntimeMeshIndexTraits<IndexType>::IsValidIndexType);
+		bool UVsAreHighPrecision;
+		int32 NumUVs;
+		GetUVVertexProperties<UVType>(UVsAreHighPrecision, NumUVs);
+		CheckUpdate(GetTangentIsHighPrecision<TangentType>(), UVsAreHighPrecision, NumUVs, FRuntimeMeshIndexTraits<IndexType>::Is32Bit, SectionIndex, bShouldCheckIndexType, bCheckTangentVertexStream, bCheckUVVertexStream);
 #endif
 	}
 
-	void CheckUpdate(const FRuntimeMeshVertexStreamStructure& Stream0Structure, const FRuntimeMeshVertexStreamStructure& Stream1Structure,
-		const FRuntimeMeshVertexStreamStructure& Stream2Structure, bool b32BitIndices,
-		int32 SectionIndex, bool bShouldCheckIndexType, bool bCheckVertexStream0 = true, bool bCheckVertexStream1 = true, bool bCheckVertexStream2 = true) const;
-
 	template<typename VertexType0, typename VertexType1, typename VertexType2, typename IndexType>
-	void CheckUpdate(int32 SectionIndex, bool bShouldCheckIndexType, bool bCheckVertexStream0 = true, bool bCheckVertexStream1 = true, bool bCheckVertexStream2 = true) const
+	void CheckUpdateLegacy(int32 SectionIndex, bool bShouldCheckIndexType = true) const
 	{
-#if DO_CHECK
-		CheckUpdate(GetStreamStructure<VertexType0>(), GetStreamStructure<VertexType1>(), GetStreamStructure<VertexType2>(), FRuntimeMeshIndexTraits<IndexType>::Is32Bit, SectionIndex,
-			!bShouldCheckIndexType || FRuntimeMeshIndexTraits<IndexType>::IsValidIndexType, bCheckVertexStream0, bCheckVertexStream1, bCheckVertexStream2);
-#endif
 	}
 
 	void CheckBoundingBox(const FBox& Box) const;
 
 public:
 
+	/* 
+		This will put the RuntimeMesh into serialized mode where it becomes safe to access it from other threads. 
+		Don't do this if you don't need it as it will make interacting with it slighly slower as it incurs thread locks.
+	*/
+	void EnterSerializedMode();
+
+
+	void CreateMeshSection(int32 SectionIndex, bool bWantsHighPrecisionTangents, bool bWantsHighPrecisionUVs, int32 NumUVs, bool bWants32BitIndices, bool bCreateCollision, EUpdateFrequency UpdateFrequency = EUpdateFrequency::Average);
 	
-	template<typename VertexType0, typename IndexType>
-	void CreateMeshSection(int32 SectionIndex, bool bCreateCollision = false, EUpdateFrequency UpdateFrequency = EUpdateFrequency::Average)
-	{
-		SCOPE_CYCLE_COUNTER(STAT_RuntimeMesh_CreateMeshSection_NoData);
-
-		FRuntimeMeshScopeLock Lock(SyncRoot);
-
-		CheckCreate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>();
-
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionIndex, UpdateFrequency);
-
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
-
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, ESectionUpdateFlags::None);
-	}
-
-	template<typename VertexType0, typename VertexType1, typename IndexType>
-	void CreateMeshSectionDualBuffer(int32 SectionIndex, bool bCreateCollision = false, EUpdateFrequency UpdateFrequency = EUpdateFrequency::Average)
-	{
-		SCOPE_CYCLE_COUNTER(STAT_RuntimeMesh_CreateMeshSectionDualBuffer_NoData);
-
-		FRuntimeMeshScopeLock Lock(SyncRoot);
-
-		CheckCreate<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>();
-
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>(SectionIndex, UpdateFrequency);
-
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
-
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, ESectionUpdateFlags::None);
-	}
-
-	template<typename VertexType0, typename VertexType1, typename VertexType2, typename IndexType>
-	void CreateMeshSectionTripleBuffer(int32 SectionIndex, bool bCreateCollision = false, EUpdateFrequency UpdateFrequency = EUpdateFrequency::Average)
-	{
-		SCOPE_CYCLE_COUNTER(STAT_RuntimeMesh_CreateMeshSectionTripleBuffer_NoData);
-
-		FRuntimeMeshScopeLock Lock(SyncRoot);
-
-		CheckCreate<VertexType0, VertexType1, VertexType2, IndexType>();
-
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, VertexType1, VertexType2, IndexType>(SectionIndex, UpdateFrequency);
-
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
-
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, ESectionUpdateFlags::None);
-	}
-
-	
-
 	template<typename VertexType0, typename IndexType>
 	void CreateMeshSection(int32 SectionIndex, TArray<VertexType0>& InVertices0, TArray<IndexType>& InTriangles, bool bCreateCollision = false,
 		EUpdateFrequency UpdateFrequency = EUpdateFrequency::Average, ESectionUpdateFlags UpdateFlags = ESectionUpdateFlags::None)
@@ -189,20 +139,33 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckCreate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>();
+		CheckCreateLegacy<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>();
 
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionIndex, UpdateFrequency);
+		bool bWantsHighPrecisionTangents = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionTangents<VertexType0>();
+		bool bWantsHighPrecisionUVs = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionUVs<VertexType0>();
+		int32 NumUVs = FRuntimeMeshVertexTypeTraitsAggregator::NumUVs<VertexType0>();
+		bool bUsing32BitIndices = FRuntimeMeshIndexTraits<IndexType>::Is32Bit;
 
-		// Set the vertex and index buffers
-		Section->UpdateVertexBuffer0(InVertices0);
-		Section->UpdateIndexBuffer(InTriangles);
+		CreateMeshSection(SectionIndex, bWantsHighPrecisionTangents, bWantsHighPrecisionUVs, NumUVs, bUsing32BitIndices, bCreateCollision, UpdateFrequency);
 
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
+		auto Mesh = BeginSectionUpdate(SectionIndex, UpdateFlags);
+		
+		Mesh->EmptyVertices(InVertices0.Num());
 
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, UpdateFlags);
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
+		{
+			Mesh->AddVertexByProperties<VertexType0>(InVertices0[Index]);
+		}
+
+		Mesh->EmptyIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
+		{
+			Mesh->AddIndex(InTriangles[Index]);
+		}
+		
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0, typename IndexType>
@@ -213,20 +176,33 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckCreate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>();
+		CheckCreateLegacy<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>();
 
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionIndex, UpdateFrequency);
+		bool bWantsHighPrecisionTangents = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionTangents<VertexType0>();
+		bool bWantsHighPrecisionUVs = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionUVs<VertexType0>();
+		int32 NumUVs = FRuntimeMeshVertexTypeTraitsAggregator::NumUVs<VertexType0>();
+		bool bUsing32BitIndices = FRuntimeMeshIndexTraits<IndexType>::Is32Bit;
 
-		// Set the vertex and index buffers
-		Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-		Section->UpdateIndexBuffer(InTriangles);
+		CreateMeshSection(SectionIndex, bWantsHighPrecisionTangents, bWantsHighPrecisionUVs, NumUVs, bUsing32BitIndices, bCreateCollision, UpdateFrequency);
 
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
+		auto Mesh = BeginSectionUpdate(SectionIndex, UpdateFlags);
 
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, UpdateFlags);
+		Mesh->EmptyVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
+		{
+			Mesh->AddVertexByProperties<VertexType0>(InVertices0[Index]);
+		}
+
+		Mesh->EmptyIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
+		{
+			Mesh->AddIndex(InTriangles[Index]);
+		}
+
+		Mesh->Commit(BoundingBox);
 	}
 
 	template<typename VertexType0, typename VertexType1, typename IndexType>
@@ -237,21 +213,33 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckCreate<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>();
+		CheckCreateLegacy<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>();
 
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>(SectionIndex, UpdateFrequency);
+		bool bWantsHighPrecisionTangents = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionTangents<VertexType0, VertexType1>();
+		bool bWantsHighPrecisionUVs = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionUVs<VertexType0, VertexType1>();
+		int32 NumUVs = FRuntimeMeshVertexTypeTraitsAggregator::NumUVs<VertexType0, VertexType1>();
+		bool bUsing32BitIndices = FRuntimeMeshIndexTraits<IndexType>::Is32Bit;
 
-		// Set the vertex and index buffers
-		Section->UpdateVertexBuffer0(InVertices0);
-		Section->UpdateVertexBuffer1(InVertices1);
-		Section->UpdateIndexBuffer(InTriangles);
+		CreateMeshSection(SectionIndex, bWantsHighPrecisionTangents, bWantsHighPrecisionUVs, NumUVs, bUsing32BitIndices, bCreateCollision, UpdateFrequency);
 
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
+		auto Mesh = BeginSectionUpdate(SectionIndex, UpdateFlags);
 
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, UpdateFlags);
+		Mesh->EmptyVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
+		{
+			Mesh->AddVertexByProperties<VertexType0, VertexType1>(InVertices0[Index], InVertices1[Index]);
+		}
+
+		Mesh->EmptyIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
+		{
+			Mesh->AddIndex(InTriangles[Index]);
+		}
+
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0, typename VertexType1, typename IndexType>
@@ -262,21 +250,33 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckCreate<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>();
+		CheckCreateLegacy<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>();
 
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>(SectionIndex, UpdateFrequency);
+		bool bWantsHighPrecisionTangents = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionTangents<VertexType0, VertexType1>();
+		bool bWantsHighPrecisionUVs = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionUVs<VertexType0, VertexType1>();
+		int32 NumUVs = FRuntimeMeshVertexTypeTraitsAggregator::NumUVs<VertexType0, VertexType1>();
+		bool bUsing32BitIndices = FRuntimeMeshIndexTraits<IndexType>::Is32Bit;
 
-		// Set the vertex and index buffers
-		Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-		Section->UpdateVertexBuffer1(InVertices1);
-		Section->UpdateIndexBuffer(InTriangles);
+		CreateMeshSection(SectionIndex, bWantsHighPrecisionTangents, bWantsHighPrecisionUVs, NumUVs, bUsing32BitIndices, bCreateCollision, UpdateFrequency);
 
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
+		auto Mesh = BeginSectionUpdate(SectionIndex, UpdateFlags);
 
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, UpdateFlags);
+		Mesh->EmptyVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
+		{
+			Mesh->AddVertexByProperties<VertexType0, VertexType1>(InVertices0[Index], InVertices1[Index]);
+		}
+
+		Mesh->EmptyIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
+		{
+			Mesh->AddIndex(InTriangles[Index]);
+		}
+
+		Mesh->Commit(BoundingBox);
 	}
 
 	template<typename VertexType0, typename VertexType1, typename VertexType2, typename IndexType>
@@ -286,23 +286,34 @@ public:
 		SCOPE_CYCLE_COUNTER(STAT_RuntimeMesh_CreateMeshSectionTripleBuffer);
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
+		
+		CheckCreateLegacy<VertexType0, VertexType1, VertexType2, IndexType>();
 
-		CheckCreate<VertexType0, VertexType1, VertexType2, IndexType>();
+		bool bWantsHighPrecisionTangents = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionTangents<VertexType0, VertexType1, VertexType2>();
+		bool bWantsHighPrecisionUVs = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionUVs<VertexType0, VertexType1, VertexType2>();
+		int32 NumUVs = FRuntimeMeshVertexTypeTraitsAggregator::NumUVs<VertexType0, VertexType1, VertexType2>();
+		bool bUsing32BitIndices = FRuntimeMeshIndexTraits<IndexType>::Is32Bit;
 
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, VertexType1, VertexType2, IndexType>(SectionIndex, UpdateFrequency);
+		CreateMeshSection(SectionIndex, bWantsHighPrecisionTangents, bWantsHighPrecisionUVs, NumUVs, bUsing32BitIndices, bCreateCollision, UpdateFrequency);
 
-		// Set the vertex and index buffers
-		Section->UpdateVertexBuffer0(InVertices0);
-		Section->UpdateVertexBuffer1(InVertices1);
-		Section->UpdateVertexBuffer2(InVertices2);
-		Section->UpdateIndexBuffer(InTriangles);
+		auto Mesh = BeginSectionUpdate(SectionIndex, UpdateFlags);
 
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
+		Mesh->EmptyVertices(InVertices0.Num());
 
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, UpdateFlags);
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
+		{
+			Mesh->AddVertexByProperties<VertexType0, VertexType1, VertexType2>(InVertices0[Index], InVertices1[Index], InVertices2[Index]);
+		}
+
+		Mesh->EmptyIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
+		{
+			Mesh->AddIndex(InTriangles[Index]);
+		}
+
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0, typename VertexType1, typename VertexType2, typename IndexType>
@@ -313,22 +324,33 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckCreate<VertexType0, VertexType1, VertexType2, IndexType>();
+		CheckCreateLegacy<VertexType0, VertexType1, VertexType2, IndexType>();
 
-		// Create the section
-		FRuntimeMeshSectionPtr Section = CreateOrResetSection<VertexType0, VertexType1, VertexType2, IndexType>(SectionIndex, UpdateFrequency);
+		bool bWantsHighPrecisionTangents = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionTangents<VertexType0, VertexType1, VertexType2>();
+		bool bWantsHighPrecisionUVs = FRuntimeMeshVertexTypeTraitsAggregator::IsUsingHighPrecisionUVs<VertexType0, VertexType1, VertexType2>();
+		int32 NumUVs = FRuntimeMeshVertexTypeTraitsAggregator::NumUVs<VertexType0, VertexType1, VertexType2>();
+		bool bUsing32BitIndices = FRuntimeMeshIndexTraits<IndexType>::Is32Bit;
 
-		// Set the vertex and index buffers
-		Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-		Section->UpdateVertexBuffer1(InVertices1);
-		Section->UpdateVertexBuffer2(InVertices2);
-		Section->UpdateIndexBuffer(InTriangles);
+		CreateMeshSection(SectionIndex, bWantsHighPrecisionTangents, bWantsHighPrecisionUVs, NumUVs, bUsing32BitIndices, bCreateCollision, UpdateFrequency);
 
-		// Track collision status and update collision information if necessary
-		Section->SetCollisionEnabled(bCreateCollision);
+		auto Mesh = BeginSectionUpdate(SectionIndex, UpdateFlags);
 
-		// Finalize section.
-		CreateSectionInternal(SectionIndex, UpdateFlags);
+		Mesh->EmptyVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
+		{
+			Mesh->AddVertexByProperties<VertexType0, VertexType1, VertexType2>(InVertices0[Index], InVertices1[Index], InVertices2[Index]);
+		}
+
+		Mesh->EmptyIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
+		{
+			Mesh->AddIndex(InTriangles[Index]);
+		}
+
+		Mesh->Commit(BoundingBox);
 	}
 
 
@@ -340,24 +362,19 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, uint16>(SectionId, false);
+		CheckUpdateLegacy<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, uint16>(SectionId, false);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
-		
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		Mesh->SetNumVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0>
@@ -367,25 +384,20 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, uint16>(SectionId, false);
+		CheckUpdateLegacy<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, uint16>(SectionId, false);
 		CheckBoundingBox(BoundingBox);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
-		
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		Mesh->SetNumVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit(BoundingBox);
 	}
 
 	template<typename VertexType0, typename IndexType>
@@ -395,31 +407,26 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
+		CheckUpdateLegacy<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
-		
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		Mesh->SetNumVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
 		}
 
-		// Update triangles if supplied
-		if (InTriangles.Num() > 0)
+		Mesh->SetNumIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
 		{
-			Section->UpdateIndexBuffer(InTriangles);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::IndexBuffer;
+			Mesh->SetIndex(Index, InTriangles[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0, typename IndexType>
@@ -430,32 +437,27 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
+		CheckUpdateLegacy<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
 		CheckBoundingBox(BoundingBox);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
-		
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		Mesh->SetNumVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
 		}
 
-		// Update triangles if supplied
-		if (InTriangles.Num() > 0)
+		Mesh->SetNumIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
 		{
-			Section->UpdateIndexBuffer(InTriangles);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::IndexBuffer;
+			Mesh->SetIndex(Index, InTriangles[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit(BoundingBox);
 	}
 
 	template<typename VertexType0, typename VertexType1>
@@ -466,31 +468,23 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, VertexType1, FRuntimeMeshNullVertex, uint16>(SectionId, false);
+		CheckUpdateLegacy<VertexType0, VertexType1, FRuntimeMeshNullVertex, uint16>(SectionId, false);
+		
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		Mesh->SetNumVertices(InVertices0.Num());
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
-
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
+			if (InVertices1.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
+			}
 		}
 
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
-		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
-		}
-
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0, typename VertexType1>
@@ -501,32 +495,24 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, VertexType1, FRuntimeMeshNullVertex, uint16>(SectionId, false);
+		CheckUpdateLegacy<VertexType0, VertexType1, FRuntimeMeshNullVertex, uint16>(SectionId, false);
 		CheckBoundingBox(BoundingBox);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		Mesh->SetNumVertices(InVertices0.Num());
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
+			if (InVertices1.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
+			}
 		}
 
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
-		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
-		}
-
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit(BoundingBox);
 	}
 
 	template<typename VertexType0, typename VertexType1, typename IndexType>
@@ -537,38 +523,30 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
+		CheckUpdateLegacy<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		Mesh->SetNumVertices(InVertices0.Num());
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
+			if (InVertices1.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
+			}
 		}
 
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
+		Mesh->SetNumIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
+			Mesh->SetIndex(Index, InTriangles[Index]);
 		}
 
-		// Update triangles if supplied
-		if (InTriangles.Num() > 0)
-		{
-			Section->UpdateIndexBuffer(InTriangles);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::IndexBuffer;
-		}
-
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0, typename VertexType1, typename IndexType>
@@ -579,39 +557,31 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
+		CheckUpdateLegacy<VertexType0, VertexType1, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
 		CheckBoundingBox(BoundingBox);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		Mesh->SetNumVertices(InVertices0.Num());
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
+			if (InVertices1.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
+			}
 		}
 
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
+		Mesh->SetNumIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
+			Mesh->SetIndex(Index, InTriangles[Index]);
 		}
 
-		// Update triangles if supplied
-		if (InTriangles.Num() > 0)
-		{
-			Section->UpdateIndexBuffer(InTriangles);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::IndexBuffer;
-		}
-
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit(BoundingBox);
 	}
 
 	template<typename VertexType0, typename VertexType1, typename VertexType2>
@@ -622,38 +592,27 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, VertexType1, VertexType2, uint16>(SectionId, false);
+		CheckUpdateLegacy<VertexType0, VertexType1, VertexType2, uint16>(SectionId, false);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
-		
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		Mesh->SetNumVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
+			if (InVertices1.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
+			}
+			if (InVertices2.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType2>(Index, InVertices2[Index]);
+			}
 		}
 
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
-		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
-		}
-
-		// Update vertices if supplied
-		if (InVertices2.Num() > 0)
-		{
-			Section->UpdateVertexBuffer2(InVertices2);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer2;
-		}
-
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0, typename VertexType1, typename VertexType2>
@@ -664,39 +623,28 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, VertexType1, VertexType2, uint16>(SectionId, false);
+		CheckUpdateLegacy<VertexType0, VertexType1, VertexType2, uint16>(SectionId, false);
 		CheckBoundingBox(BoundingBox);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		Mesh->SetNumVertices(InVertices0.Num());
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
+			if (InVertices1.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
+			}
+			if (InVertices2.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType2>(Index, InVertices2[Index]);
+			}
 		}
 
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
-		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
-		}
-
-		// Update vertices if supplied
-		if (InVertices2.Num() > 0)
-		{
-			Section->UpdateVertexBuffer2(InVertices2);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer2;
-		}
-
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit(BoundingBox);
 	}
 
 	template<typename VertexType0, typename VertexType1, typename VertexType2, typename IndexType>
@@ -707,45 +655,34 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, VertexType1, VertexType2, IndexType>(SectionId, true);
+		CheckUpdateLegacy<VertexType0, VertexType1, VertexType2, IndexType>(SectionId, true);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		Mesh->SetNumVertices(InVertices0.Num());
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
+			if (InVertices1.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
+			}
+			if (InVertices2.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType2>(Index, InVertices2[Index]);
+			}
 		}
 
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
+		Mesh->SetNumIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
+			Mesh->SetIndex(Index, InTriangles[Index]);
 		}
 
-		// Update vertices if supplied
-		if (InVertices2.Num() > 0)
-		{
-			Section->UpdateVertexBuffer2(InVertices2);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer2;
-		}
-
-		// Update triangles if supplied
-		if (InTriangles.Num() > 0)
-		{
-			Section->UpdateIndexBuffer(InTriangles);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::IndexBuffer;
-		}
-
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0, typename VertexType1, typename VertexType2, typename IndexType>
@@ -756,46 +693,35 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, VertexType1, VertexType2, IndexType>(SectionId, true);
+		CheckUpdateLegacy<VertexType0, VertexType1, VertexType2, IndexType>(SectionId, true);
 		CheckBoundingBox(BoundingBox);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		Mesh->SetNumVertices(InVertices0.Num());
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
+			if (InVertices1.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
+			}
+			if (InVertices2.Num() > Index)
+			{
+				Mesh->SetVertexProperties<VertexType2>(Index, InVertices2[Index]);
+			}
 		}
 
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
+		Mesh->SetNumIndices(InTriangles.Num());
+
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
+			Mesh->SetIndex(Index, InTriangles[Index]);
 		}
 
-		// Update vertices if supplied
-		if (InVertices2.Num() > 0)
-		{
-			Section->UpdateVertexBuffer2(InVertices2);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer2;
-		}
-
-		// Update triangles if supplied
-		if (InTriangles.Num() > 0)
-		{
-			Section->UpdateIndexBuffer(InTriangles);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::IndexBuffer;
-		}
-
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit(BoundingBox);
 	}
 	
 
@@ -807,24 +733,19 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, uint16>(SectionId, false, true, false, false);
+		CheckUpdateLegacy<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, uint16>(SectionId, false);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
-		
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		Mesh->SetNumVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename VertexType0>
@@ -834,25 +755,20 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, uint16>(SectionId, false, true, false, false);
+		CheckUpdateLegacy<VertexType0, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, uint16>(SectionId, false);
 		CheckBoundingBox(BoundingBox);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
-		
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		// Update vertices if supplied
-		if (InVertices0.Num() > 0)
+		Mesh->SetNumVertices(InVertices0.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < InVertices0.Num(); Index++)
 		{
-			Section->UpdateVertexBuffer0(InVertices0, &BoundingBox);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer0;
+			Mesh->SetVertexProperties<VertexType0>(Index, InVertices0[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit(BoundingBox);
 	}
 
 	template<typename VertexType1>
@@ -862,24 +778,19 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<FRuntimeMeshNullVertex, VertexType1, FRuntimeMeshNullVertex, uint16>(SectionId, false, false, true, false);
+		CheckUpdateLegacy<FRuntimeMeshNullVertex, VertexType1, FRuntimeMeshNullVertex, uint16>(SectionId, false);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
+		
+		int32 NumVerts = FMath::Min(Mesh->NumVertices(), InVertices1.Num());
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
-
-		// Update vertices if supplied
-		if (InVertices1.Num() > 0)
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < NumVerts; Index++)
 		{
-			Section->UpdateVertexBuffer1(InVertices1);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer1;
+			Mesh->SetVertexProperties<VertexType1>(Index, InVertices1[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename VertexType2>
@@ -889,24 +800,19 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, VertexType2, uint16>(SectionId, false, false, false, true);
+		CheckUpdateLegacy<FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, VertexType2, uint16>(SectionId, false);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
-		
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
 
-		// Update vertices if supplied
-		if (InVertices2.Num() > 0)
+		int32 NumVerts = FMath::Min(Mesh->NumVertices(), InVertices2.Num());
+
+		// Copy the mesh data to the mesh builder
+		for (int32 Index = 0; Index < NumVerts; Index++)
 		{
-			Section->UpdateVertexBuffer2(InVertices2);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::VertexBuffer2;
+			Mesh->SetVertexProperties<VertexType2>(Index, InVertices2[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 	template<typename IndexType>
@@ -916,24 +822,18 @@ public:
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
 
-		CheckUpdate<FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionId, true, false, false, false);
+		CheckUpdateLegacy<FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionId, true);
 
-		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
+		auto Mesh = BeginSectionUpdate(SectionId, UpdateFlags);
+		
+		Mesh->SetNumIndices(InTriangles.Num());
 
-		ERuntimeMeshBuffersToUpdate BuffersToUpdate = ERuntimeMeshBuffersToUpdate::None;
-
-		// Update triangles if supplied
-		if (InTriangles.Num() > 0)
+		for (int32 Index = 0; Index < InTriangles.Num(); Index++)
 		{
-			Section->UpdateIndexBuffer(InTriangles);
-			BuffersToUpdate |= ERuntimeMeshBuffersToUpdate::IndexBuffer;
+			Mesh->SetIndex(Index, InTriangles[Index]);
 		}
 
-		// Finalize section update if we have anything to apply
-		if (BuffersToUpdate != ERuntimeMeshBuffersToUpdate::None)
-		{
-			UpdateSectionInternal(SectionId, BuffersToUpdate, UpdateFlags);
-		}
+		Mesh->Commit();
 	}
 
 
@@ -951,6 +851,18 @@ public:
 	void UpdateMeshSectionByMove(int32 SectionId, const TSharedPtr<FRuntimeMeshBuilder>& MeshData, ESectionUpdateFlags UpdateFlags = ESectionUpdateFlags::None);
 
 
+
+
+
+	TUniquePtr<FRuntimeMeshScopedUpdater> BeginSectionUpdate(int32 SectionId, ESectionUpdateFlags UpdateFlags = ESectionUpdateFlags::None);
+
+	TUniquePtr<FRuntimeMeshScopedUpdater> GetSectionReadonly(int32 SectionId);
+
+
+private:
+	void EndSectionUpdate(FRuntimeMeshScopedUpdater* Updater, ERuntimeMeshBuffersToUpdate BuffersToUpdate, const FBox* BoundingBox = nullptr);
+
+
 private:
 	void CreateMeshSectionFromComponents(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals,
 		const TArray<FVector2D>& UV0, const TArray<FVector2D>& UV1, TFunction<FColor(int32 Index)> ColorAccessor, int32 NumColors, const TArray<FRuntimeMeshTangent>& Tangents,
@@ -960,6 +872,9 @@ private:
 		const TArray<FVector2D>& UV0, const TArray<FVector2D>& UV1, TFunction<FColor(int32 Index)> ColorAccessor, int32 NumColors, const TArray<FRuntimeMeshTangent>& Tangents, ESectionUpdateFlags UpdateFlags);
 
 public:
+
+	// HORU :)
+	void UpdateMeshSectionColors(int32 SectionIndex, TArray<FColor>& Colors, ESectionUpdateFlags UpdateFlags = ESectionUpdateFlags::None);
 
 	void CreateMeshSection(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals,
 		const TArray<FVector2D>& UV0, const TArray<FColor>& Colors, const TArray<FRuntimeMeshTangent>& Tangents, bool bCreateCollision = false,
@@ -1004,7 +919,8 @@ public:
 
 	
 
-	TSharedPtr<const FRuntimeMeshAccessor> GetReadonlyMeshAccessor(int32 SectionId);
+
+
 	
 
 	template<typename IndexType>
@@ -1013,8 +929,7 @@ public:
 		SCOPE_CYCLE_COUNTER(STAT_RuntimeMesh_SetSectionTessellationTriangles);
 
 		FRuntimeMeshScopeLock Lock(SyncRoot);
-
-		CheckUpdate<FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, FRuntimeMeshNullVertex, IndexType>(SectionId, true, false, false, false);
+		CheckUpdate(false, false, 0, FRuntimeMeshIndexTraits<IndexType>::Is32Bit, SectionId, true, false, false);
 
 		FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
 
@@ -1033,8 +948,7 @@ public:
 			UpdateSectionInternal(SectionId, BuffersToUpdate, ESectionUpdateFlags::None);
 		}
 	}
-
-
+	
 	/** Clear a section of the procedural mesh. */
 	void ClearMeshSection(int32 SectionIndex);
 
@@ -1140,18 +1054,20 @@ private:
 
 
 	/* Creates an mesh section of a specified type at the specified index. */
-	template<typename VertexType0, typename VertexType1, typename VertexType2, typename IndexType>
+	template<typename TangentType, typename UVType, typename IndexType>
 	FRuntimeMeshSectionPtr CreateOrResetSection(int32 SectionId, EUpdateFrequency UpdateFrequency)
 	{
 		static_assert(FRuntimeMeshIndexTraits<IndexType>::IsValidIndexType, "Indices can only be of type uint16, uint32, or int32");
 
-		return CreateOrResetSection(SectionId, GetStreamStructure<VertexType0>(), GetStreamStructure<VertexType1>(),
-			GetStreamStructure<VertexType2>(), FRuntimeMeshIndexTraits<IndexType>::Is32Bit, UpdateFrequency);
+		bool bHighPrecisionUVs;
+		int32 NumUVs;
+		GetUVVertexProperties<UVType>(bHighPrecisionUVs, NumUVs);
+
+		return CreateOrResetSection(SectionId, GetTangentIsHighPrecision<TangentType>(), bHighPrecisionUVs, NumUVs, FRuntimeMeshIndexTraits<IndexType>::Is32Bit, UpdateFrequency);
 	}
 
-	FRuntimeMeshSectionPtr CreateOrResetSection(int32 SectionId,
-		const FRuntimeMeshVertexStreamStructure& Stream0, const FRuntimeMeshVertexStreamStructure& Stream1,
-		const FRuntimeMeshVertexStreamStructure& Stream2, bool b32BitIndices, EUpdateFrequency UpdateFrequency);
+	FRuntimeMeshSectionPtr CreateOrResetSection(int32 SectionId, bool bInUseHighPrecisionTangents, bool bInUseHighPrecisionUVs, 
+		int32 InNumUVs, bool b32BitIndices, EUpdateFrequency UpdateFrequency);
 
 	FRuntimeMeshSectionPtr CreateOrResetSectionForBlueprint(int32 SectionId, bool bWantsSecondUV,
 		bool bHighPrecisionTangents, bool bHighPrecisionUVs, EUpdateFrequency UpdateFrequency);
@@ -1171,7 +1087,9 @@ private:
 	/** Update LocalBounds member from the local box of each section */
 	void UpdateLocalBounds();
 
-	FRuntimeMeshProxyPtr EnsureProxyCreated();
+	FRuntimeMeshProxyPtr EnsureProxyCreated(ERHIFeatureLevel::Type InFeatureLevel);
+	
+	TSharedPtr<const FRuntimeMeshAccessor> GetReadonlyMeshAccessor(int32 SectionId);
 
 	void Initialize();
 
@@ -1195,7 +1113,7 @@ private:
 	{
 		SCOPE_CYCLE_COUNTER(STAT_RuntimeMesh_SerializationOperator);
 
-		//FRuntimeMeshScopeLock Lock(MeshData.SyncRoot);
+		FRuntimeMeshScopeLock Lock(MeshData.SyncRoot, false, true);
 
 		Ar << MeshData.MeshSections;
 
@@ -1215,6 +1133,7 @@ private:
 	}
 
 	friend class URuntimeMesh;
+	friend class FRuntimeMeshScopedUpdater;
 };
 
 using FRuntimeMeshDataRef = TSharedRef<FRuntimeMeshData, ESPMode::ThreadSafe>;

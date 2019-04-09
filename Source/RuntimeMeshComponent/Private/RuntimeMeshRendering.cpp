@@ -1,20 +1,21 @@
 // Copyright 2016-2018 Chris Conway (Koderz). All Rights Reserved.
 
-#include "RuntimeMeshComponentPlugin.h"
 #include "RuntimeMeshRendering.h"
+#include "RuntimeMeshComponentPlugin.h"
 #include "RuntimeMeshSectionProxy.h"
 
 
-FRuntimeMeshVertexBuffer::FRuntimeMeshVertexBuffer()
-	: VertexSize(-1), NumVertices(0), UsageFlags(EBufferUsageFlags::BUF_None)
+FRuntimeMeshVertexBuffer::FRuntimeMeshVertexBuffer(EUpdateFrequency InUpdateFrequency, int32 InVertexSize)
+	: UsageFlags(InUpdateFrequency == EUpdateFrequency::Frequent? BUF_Dynamic : BUF_Static)
+	, VertexSize(InVertexSize)
+	, NumVertices(0)
+	, ShaderResourceView(nullptr)
 {
 }
 
-void FRuntimeMeshVertexBuffer::Reset(int32 InVertexSize, int32 InNumVertices, EUpdateFrequency InUpdateFrequency)
+void FRuntimeMeshVertexBuffer::Reset(int32 InNumVertices)
 {
-	VertexSize = InVertexSize;
 	NumVertices = InNumVertices;
-	UsageFlags = InUpdateFrequency == EUpdateFrequency::Frequent ? BUF_Dynamic : BUF_Static;
 	ReleaseResource();
 	InitResource();
 }
@@ -25,7 +26,15 @@ void FRuntimeMeshVertexBuffer::InitRHI()
 	{
 		// Create the vertex buffer
 		FRHIResourceCreateInfo CreateInfo;
-		VertexBufferRHI = RHICreateVertexBuffer(GetBufferSize(), UsageFlags, CreateInfo);
+		VertexBufferRHI = RHICreateVertexBuffer(GetBufferSize(), UsageFlags | BUF_ShaderResource, CreateInfo);
+
+
+#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION >= 19
+		if (RHISupportsManualVertexFetch(GMaxRHIShaderPlatform))
+		{
+			CreateSRV();
+		}
+#endif
 	}
 }
 
@@ -65,7 +74,7 @@ void FRuntimeMeshVertexBuffer::SetData(const TArray<uint8>& Data)
 
 
 FRuntimeMeshIndexBuffer::FRuntimeMeshIndexBuffer()
-	: IndexSize(-1), NumIndices(0), UsageFlags(EBufferUsageFlags::BUF_None)
+	: NumIndices(0), IndexSize(-1), UsageFlags(EBufferUsageFlags::BUF_None)
 {
 }
 
@@ -125,8 +134,13 @@ void FRuntimeMeshIndexBuffer::SetData(const TArray<uint8>& Data)
 
 
 
-FRuntimeMeshVertexFactory::FRuntimeMeshVertexFactory(FRuntimeMeshSectionProxy* InSectionParent)
-	: SectionParent(InSectionParent)
+FRuntimeMeshVertexFactory::FRuntimeMeshVertexFactory(ERHIFeatureLevel::Type InFeatureLevel, FRuntimeMeshSectionProxy* InSectionParent)
+	: FLocalVertexFactory(
+#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION >= 19
+		InFeatureLevel, "FRuntimeMeshVertexFactory"
+#endif
+	)
+	, SectionParent(InSectionParent)
 {
 }
 
@@ -140,18 +154,24 @@ void FRuntimeMeshVertexFactory::Init(FLocalVertexFactory::FDataType VertexStruct
 	else
 	{
 		// Send the command to the render thread
-		ENQUEUE_UNIQUE_RENDER_COMMAND_TWOPARAMETER(
-			InitRuntimeMeshVertexFactory,
-			FRuntimeMeshVertexFactory*, VertexFactory, this,
-			FLocalVertexFactory::FDataType, VertexStructure, VertexStructure,
+		// HORU: 4.22 rendering
+		ENQUEUE_RENDER_COMMAND(InitRuntimeMeshVertexFactory)(
+			[this, VertexStructure](FRHICommandListImmediate & RHICmdList)
 			{
-				VertexFactory->Init(VertexStructure);
-			});
+				Init(VertexStructure);
+			}
+		);
 	}
 }
 
 /* Gets the section visibility for static sections */
+
+
+#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION >= 19
+uint64 FRuntimeMeshVertexFactory::GetStaticBatchElementVisibility(const class FSceneView& View, const struct FMeshBatch* Batch, const void* InViewCustomData) const
+#else
 uint64 FRuntimeMeshVertexFactory::GetStaticBatchElementVisibility(const class FSceneView& View, const struct FMeshBatch* Batch) const
+#endif
 {
 	return SectionParent->ShouldRender();
 }

@@ -1,10 +1,11 @@
 // Copyright 2016-2018 Chris Conway (Koderz). All Rights Reserved.
 
-#include "RuntimeMeshComponentPlugin.h"
 #include "RuntimeMeshProxy.h"
+#include "RuntimeMeshComponentPlugin.h"
 #include "RuntimeMesh.h"
 
-FRuntimeMeshProxy::FRuntimeMeshProxy()
+FRuntimeMeshProxy::FRuntimeMeshProxy(ERHIFeatureLevel::Type InFeatureLevel)
+	: FeatureLevel(InFeatureLevel)
 {
 }
 
@@ -17,13 +18,11 @@ FRuntimeMeshProxy::~FRuntimeMeshProxy()
 
 void FRuntimeMeshProxy::CreateSection_GameThread(int32 SectionId, const FRuntimeMeshSectionCreationParamsPtr& SectionData)
 {
-	ENQUEUE_UNIQUE_RENDER_COMMAND_THREEPARAMETER(
-		FRuntimeMeshProxyCreateSection,
-		FRuntimeMeshProxy*, MeshProxy, this,
-		int32, SectionId, SectionId,
-		FRuntimeMeshSectionCreationParamsPtr, SectionData, SectionData,
+	// HORU: 4.22 rendering
+	ENQUEUE_RENDER_COMMAND(FRuntimeMeshProxyCreateSection)(
+		[this, SectionId, SectionData](FRHICommandListImmediate & RHICmdList)
 		{
-			MeshProxy->CreateSection_RenderThread(SectionId, SectionData);
+			CreateSection_RenderThread(SectionId, SectionData);
 		}
 	);
 }
@@ -33,7 +32,7 @@ void FRuntimeMeshProxy::CreateSection_RenderThread(int32 SectionId, const FRunti
 	check(IsInRenderingThread());
 	check(SectionData.IsValid());
 
-	FRuntimeMeshSectionProxyPtr NewSection = MakeShareable(new FRuntimeMeshSectionProxy(SectionData),
+	FRuntimeMeshSectionProxyPtr NewSection = MakeShareable(new FRuntimeMeshSectionProxy(FeatureLevel, SectionData),
 		FRuntimeMeshRenderThreadDeleter<FRuntimeMeshSectionProxy>());
 
 	// Add the section to the map, destroying any one that existed
@@ -45,13 +44,11 @@ void FRuntimeMeshProxy::CreateSection_RenderThread(int32 SectionId, const FRunti
 
 void FRuntimeMeshProxy::UpdateSection_GameThread(int32 SectionId, const FRuntimeMeshSectionUpdateParamsPtr& SectionData)
 {
-	ENQUEUE_UNIQUE_RENDER_COMMAND_THREEPARAMETER(
-		FRuntimeMeshProxyUpdateSection,
-		FRuntimeMeshProxy*, MeshProxy, this,
-		int32, SectionId, SectionId,
-		FRuntimeMeshSectionUpdateParamsPtr, SectionData, SectionData,
+	// HORU: 4.22 rendering
+	ENQUEUE_RENDER_COMMAND(FRuntimeMeshProxyUpdateSection)(
+		[this, SectionId, SectionData](FRHICommandListImmediate & RHICmdList)
 		{
-			MeshProxy->UpdateSection_RenderThread(SectionId, SectionData);
+			UpdateSection_RenderThread(SectionId, SectionData);
 		}
 	);
 }
@@ -73,13 +70,11 @@ void FRuntimeMeshProxy::UpdateSection_RenderThread(int32 SectionId, const FRunti
 
 void FRuntimeMeshProxy::UpdateSectionProperties_GameThread(int32 SectionId, const FRuntimeMeshSectionPropertyUpdateParamsPtr& SectionData)
 {
-	ENQUEUE_UNIQUE_RENDER_COMMAND_THREEPARAMETER(
-		FRuntimeMeshProxyUpdateSectionProperties,
-		FRuntimeMeshProxy*, MeshProxy, this,
-		int32, SectionId, SectionId,
-		FRuntimeMeshSectionPropertyUpdateParamsPtr, SectionData, SectionData,
+	// HORU: 4.22 rendering
+	ENQUEUE_RENDER_COMMAND(FRuntimeMeshProxyUpdateSectionProperties)(
+		[this, SectionId, SectionData](FRHICommandListImmediate & RHICmdList)
 		{
-			MeshProxy->UpdateSectionProperties_RenderThread(SectionId, SectionData);
+			UpdateSectionProperties_RenderThread(SectionId, SectionData);
 		}
 	);
 }
@@ -101,12 +96,11 @@ void FRuntimeMeshProxy::UpdateSectionProperties_RenderThread(int32 SectionId, co
 
 void FRuntimeMeshProxy::DeleteSection_GameThread(int32 SectionId)
 {
-	ENQUEUE_UNIQUE_RENDER_COMMAND_TWOPARAMETER(
-		FRuntimeMeshProxyDeleteSection,
-		FRuntimeMeshProxy*, MeshProxy, this,
-		int32, SectionId, SectionId,
+	// HORU: 4.22 rendering
+	ENQUEUE_RENDER_COMMAND(FRuntimeMeshProxyDeleteSection)(
+		[this, SectionId](FRHICommandListImmediate & RHICmdList)
 		{
-			MeshProxy->DeleteSection_RenderThread(SectionId);
+			DeleteSection_RenderThread(SectionId);
 		}
 	);
 }

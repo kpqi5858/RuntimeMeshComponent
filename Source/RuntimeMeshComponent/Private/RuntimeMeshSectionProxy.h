@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "Engine.h"
+#include "Engine/Engine.h"
 #include "Components/MeshComponent.h"
 #include "RuntimeMeshRendering.h"
 #include "RuntimeMeshUpdateCommands.h"
@@ -32,17 +32,17 @@ class FRuntimeMeshSectionProxy : public TSharedFromThis<FRuntimeMeshSectionProxy
 	/** Vertex factory for this section */
 	FRuntimeMeshVertexFactory VertexFactory;
 
-	/** Vertex buffer 0 for this section */
-	FRuntimeMeshVertexBuffer VertexBuffer0;
+	/** Vertex buffer containing the positions for this section */
+	FRuntimeMeshPositionVertexBuffer PositionBuffer;
 
-	/** Vertex buffer 1 for this section */
-	FRuntimeMeshVertexBuffer VertexBuffer1;
+	/** Vertex buffer containing the tangents for this section */
+	FRuntimeMeshTangentsVertexBuffer TangentsBuffer;
 
-	/** Vertex buffer 2 for this section */
-	FRuntimeMeshVertexBuffer VertexBuffer2;
+	/** Vertex buffer containing the UVs for this section */
+	FRuntimeMeshUVsVertexBuffer UVsBuffer;
 
-	/** Disabled component vertex buffer for this section. 0 stride buffer to pickup any unused vertex components */
-	FRuntimeMeshVertexBuffer VertexNullBuffer;
+	/** Vertex buffer containing the colors for this section */
+	FRuntimeMeshColorVertexBuffer ColorBuffer;
 
 	/** Index buffer for this section */
 	FRuntimeMeshIndexBuffer IndexBuffer;
@@ -57,11 +57,12 @@ class FRuntimeMeshSectionProxy : public TSharedFromThis<FRuntimeMeshSectionProxy
 	bool bCastsShadow;
 
 public:
-	FRuntimeMeshSectionProxy(FRuntimeMeshSectionCreationParamsPtr CreationData);
+	FRuntimeMeshSectionProxy(ERHIFeatureLevel::Type InFeatureLevel, FRuntimeMeshSectionCreationParamsPtr CreationData);
 
 	~FRuntimeMeshSectionProxy();
 
 	bool ShouldRender();
+	bool CanRender();
 
 	bool WantsToRenderInStaticPath() const;
 
@@ -71,8 +72,7 @@ public:
 
 	void CreateMeshBatch(FMeshBatch& MeshBatch, bool bWantsAdjacencyInfo);
 
-	void AddBufferToVertexDataType(FLocalVertexFactory::FDataType& DataType, const FRuntimeMeshVertexStreamStructure& Structure, FVertexBuffer* VertexBuffer);
-	bool RequiresNullBuffer(FLocalVertexFactory::FDataType& DataType);
+	void BuildVertexDataType(FLocalVertexFactory::FDataType& DataType);
 
 	void FinishUpdate_RenderThread(FRuntimeMeshSectionUpdateParamsPtr UpdateData);
 

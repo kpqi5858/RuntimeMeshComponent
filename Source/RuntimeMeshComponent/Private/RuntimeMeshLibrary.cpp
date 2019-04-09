@@ -1,8 +1,8 @@
 // Copyright 2016-2018 Chris Conway (Koderz). All Rights Reserved.
 
+#include "RuntimeMeshLibrary.h"
 #include "RuntimeMeshComponentPlugin.h"
 #include "RuntimeMeshComponent.h"
-#include "RuntimeMeshLibrary.h"
 #include "EngineGlobals.h"
 #include "Logging/TokenizedMessage.h"
 #include "Logging/MessageLog.h"
@@ -30,11 +30,11 @@ void URuntimeMeshLibrary::CalculateTangentsForMesh(const TArray<FVector>& Vertic
 		[&Vertices](int32 Index) -> FVector { return Vertices[Index]; },
 		[&UVs](int32 Index) -> FVector2D { return UVs[Index]; },
 		[&Normals, &Tangents](int32 Index, FVector TangentX, FVector TangentY, FVector TangentZ)
-	{
-		Normals[Index] = TangentZ;
-		Tangents[Index].TangentX = TangentX;
-		Tangents[Index].bFlipTangentY = GetBasisDeterminantSign(TangentX, TangentY, TangentZ) < 0;
-	},
+		{
+			Normals[Index] = TangentZ;
+			Tangents[Index].TangentX = TangentX;
+			Tangents[Index].bFlipTangentY = GetBasisDeterminantSign(TangentX, TangentY, TangentZ) < 0;
+		},
 		Vertices.Num(), UVs.Num(), Triangles.Num(), bCreateSmoothNormals);
 }
 
@@ -45,11 +45,11 @@ void URuntimeMeshLibrary::CalculateTangentsForMeshPacked(TArray<FRuntimeMeshBlue
 		[&Vertices](int32 Index) -> FVector { return Vertices[Index].Position; },
 		[&Vertices](int32 Index) -> FVector2D { return Vertices[Index].UV0; },
 		[&Vertices](int32 Index, FVector TangentX, FVector TangentY, FVector TangentZ)
-	{
-		Vertices[Index].Normal = TangentZ;
-		Vertices[Index].Tangent.TangentX = TangentX;
-		Vertices[Index].Tangent.bFlipTangentY = GetBasisDeterminantSign(TangentX, TangentY, TangentZ) < 0;
-	},
+		{
+			Vertices[Index].Normal = TangentZ;
+			Vertices[Index].Tangent.TangentX = TangentX;
+			Vertices[Index].Tangent.bFlipTangentY = GetBasisDeterminantSign(TangentX, TangentY, TangentZ) < 0;
+		},
 		Vertices.Num(), Vertices.Num(), Triangles.Num(), bCreateSmoothNormals);
 }
 
@@ -60,10 +60,10 @@ void URuntimeMeshLibrary::CalculateTangentsForMesh(TArray<FRuntimeMeshVertexSimp
 		[&Vertices](int32 Index) -> FVector { return Vertices[Index].Position; },
 		[&Vertices](int32 Index) -> FVector2D { return Vertices[Index].UV0; },
 		[&Vertices](int32 Index, FVector TangentX, FVector TangentY, FVector TangentZ)
-	{
-		Vertices[Index].Normal = TangentZ;
-		Vertices[Index].SetTangents(TangentX, TangentY, TangentZ);
-	},
+		{
+			Vertices[Index].Normal = TangentZ;
+			Vertices[Index].SetTangents(TangentX, TangentY, TangentZ);
+		},
 		Vertices.Num(), Vertices.Num(), Triangles.Num(), bCreateSmoothNormals);
 }
 
@@ -74,9 +74,9 @@ void URuntimeMeshLibrary::CalculateTangentsForMesh(const TSharedPtr<FRuntimeMesh
 		[MeshAccessor](int32 Index) -> FVector { return MeshAccessor->GetPosition(Index); },
 		[MeshAccessor](int32 Index) -> FVector2D { return MeshAccessor->GetUV(Index); },
 		[MeshAccessor](int32 Index, FVector TangentX, FVector TangentY, FVector TangentZ)
-	{
-		MeshAccessor->SetTangents(Index, TangentX, TangentY, TangentZ);
-	},
+		{
+			MeshAccessor->SetTangents(Index, TangentX, TangentY, TangentZ);
+		},
 		MeshAccessor->NumVertices(), MeshAccessor->NumVertices(), MeshAccessor->NumIndices(), bCreateSmoothNormals);
 }
 
@@ -167,28 +167,30 @@ void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODInd
 
 	GetStaticMeshSection(InMesh, LODIndex, SectionIndex, 1,
 		[&Vertices, &Normals, &Tangents](FVector Position, FVector TangentX, FVector TangentY, FVector TangentZ) -> int32
-	{
-		int32 NewIndex = Vertices.Add(Position);
-		Normals.Add(TangentZ);
-		Tangents.Add(FRuntimeMeshTangent(TangentX, GetBasisDeterminantSign(TangentX, TangentY, TangentZ) < 0));
-		return NewIndex;
-	},
+		{
+			int32 NewIndex = Vertices.Add(Position);
+			Normals.Add(TangentZ);
+			Tangents.Add(FRuntimeMeshTangent(TangentX, GetBasisDeterminantSign(TangentX, TangentY, TangentZ) < 0));
+			return NewIndex;
+		},
 		[&UVs](int32 Index, int32 UVIndex, FVector2D UV)
-	{
-		check(UVIndex == 0);
-		UVs[Index] = UV;
-	},
+		{
+			check(UVIndex == 0);
+			UVs.SetNum(Index + 1);
+			UVs[Index] = UV;
+		},
 		[&Colors](int32 Index, FColor Color)
-	{
-		Colors[Index] = Color;
-	},
+		{
+			Colors.SetNum(Index + 1);
+			Colors[Index] = Color;
+		},
 		[&Triangles](int32 Index)
-	{
-		Triangles.Add(Index);
-	},
+		{
+			Triangles.Add(Index);
+		},
 		[](int32 Index)
-	{
-	});
+		{
+		});
 }
 
 void URuntimeMeshLibrary::GetStaticMeshSectionPacked(UStaticMesh* InMesh, int32 LODIndex, int32 SectionIndex, TArray<FRuntimeMeshBlueprintVertexSimple>& Vertices, TArray<int32>& Triangles)
@@ -198,25 +200,25 @@ void URuntimeMeshLibrary::GetStaticMeshSectionPacked(UStaticMesh* InMesh, int32 
 
 	GetStaticMeshSection(InMesh, LODIndex, SectionIndex, 1,
 		[&Vertices](FVector Position, FVector TangentX, FVector TangentY, FVector TangentZ) -> int32
-	{
-		return Vertices.Add(FRuntimeMeshBlueprintVertexSimple(Position, TangentZ, FRuntimeMeshTangent(TangentX, GetBasisDeterminantSign(TangentX, TangentY, TangentZ) < 0), FVector2D::ZeroVector));
-	},
+		{
+			return Vertices.Add(FRuntimeMeshBlueprintVertexSimple(Position, TangentZ, FRuntimeMeshTangent(TangentX, GetBasisDeterminantSign(TangentX, TangentY, TangentZ) < 0), FVector2D::ZeroVector));
+		},
 		[&Vertices](int32 Index, int32 UVIndex, FVector2D UV)
-	{
-		check(UVIndex == 0);
-		Vertices[Index].UV0 = UV;
-	},
+		{
+			check(UVIndex == 0);
+			Vertices[Index].UV0 = UV;
+		},
 		[&Vertices](int32 Index, FColor Color)
-	{
-		Vertices[Index].Color = Color;
-	},
+		{
+			Vertices[Index].Color = Color;
+		},
 		[&Triangles](int32 Index)
-	{
-		Triangles.Add(Index);
-	},
+		{
+			Triangles.Add(Index);
+		},
 		[](int32 Index)
-	{
-	});
+		{
+		});
 }
 
 void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODIndex, int32 SectionIndex, TArray<FRuntimeMeshVertexSimple>& Vertices, TArray<int32>& Triangles)
@@ -226,25 +228,25 @@ void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODInd
 
 	GetStaticMeshSection(InMesh, LODIndex, SectionIndex, 1,
 		[&Vertices](FVector Position, FVector TangentX, FVector TangentY, FVector TangentZ) -> int32
-	{
-		return Vertices.Add(FRuntimeMeshVertexSimple(Position, TangentX, TangentY, TangentZ));
-	},
+		{
+			return Vertices.Add(FRuntimeMeshVertexSimple(Position, TangentX, TangentY, TangentZ));
+		},
 		[&Vertices](int32 Index, int32 UVIndex, FVector2D UV)
-	{
-		check(UVIndex == 0);
-		Vertices[Index].UV0 = UV;
-	},
+		{
+			check(UVIndex == 0);
+			Vertices[Index].UV0 = UV;
+		},
 		[&Vertices](int32 Index, FColor Color)
-	{
-		Vertices[Index].Color = Color;
-	},
+		{
+			Vertices[Index].Color = Color;
+		},
 		[&Triangles](int32 Index)
-	{
-		Triangles.Add(Index);
-	},
+		{
+			Triangles.Add(Index);
+		},
 		[](int32 Index)
-	{
-	});
+		{
+		});
 }
 
 void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODIndex, int32 SectionIndex, TArray<FRuntimeMeshVertexSimple>& Vertices, TArray<int32>& Triangles, TArray<int32>& AdjacencyTriangles)
@@ -255,26 +257,26 @@ void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODInd
 
 	GetStaticMeshSection(InMesh, LODIndex, SectionIndex, 1,
 		[&Vertices](FVector Position, FVector TangentX, FVector TangentY, FVector TangentZ) -> int32
-	{
-		return Vertices.Add(FRuntimeMeshVertexSimple(Position, TangentX, TangentY, TangentZ));
-	},
+		{
+			return Vertices.Add(FRuntimeMeshVertexSimple(Position, TangentX, TangentY, TangentZ));
+		},
 		[&Vertices](int32 Index, int32 UVIndex, FVector2D UV)
-	{
-		check(UVIndex == 0);
-		Vertices[Index].UV0 = UV;
-	},
+		{
+			check(UVIndex == 0);
+			Vertices[Index].UV0 = UV;
+		},
 		[&Vertices](int32 Index, FColor Color)
-	{
-		Vertices[Index].Color = Color;
-	},
+		{
+			Vertices[Index].Color = Color;
+		},
 		[&Triangles](int32 Index)
-	{
-		Triangles.Add(Index);
-	},
+		{
+			Triangles.Add(Index);
+		},
 		[&AdjacencyTriangles](int32 Index)
-	{
-		AdjacencyTriangles.Add(Index);
-	});
+		{
+			AdjacencyTriangles.Add(Index);
+		});
 }
 
 void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODIndex, int32 SectionIndex, const TSharedPtr<FRuntimeMeshAccessor>& MeshAccessor)
@@ -284,26 +286,26 @@ void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODInd
 
 	GetStaticMeshSection(InMesh, LODIndex, SectionIndex, MeshAccessor->NumUVChannels(),
 		[&MeshAccessor](FVector Position, FVector TangentX, FVector TangentY, FVector TangentZ) -> int32
-	{
-		int32 NewIndex = MeshAccessor->AddVertex(Position);
-		MeshAccessor->SetTangents(NewIndex, TangentX, TangentY, TangentZ);
-		return NewIndex;
-	},
+		{
+			int32 NewIndex = MeshAccessor->AddVertex(Position);
+			MeshAccessor->SetTangents(NewIndex, TangentX, TangentY, TangentZ);
+			return NewIndex;
+		},
 		[&MeshAccessor](int32 Index, int32 UVIndex, FVector2D UV)
-	{
-		MeshAccessor->SetUV(Index, UVIndex, UV);
-	},
+		{
+			MeshAccessor->SetUV(Index, UVIndex, UV);
+		},
 		[&MeshAccessor](int32 Index, FColor Color)
-	{
-		MeshAccessor->SetColor(Index, Color);
-	},
+		{
+			MeshAccessor->SetColor(Index, Color);
+		},
 		[&MeshAccessor](int32 Index)
-	{
-		MeshAccessor->AddIndex(Index);
-	},
+		{
+			MeshAccessor->AddIndex(Index);
+		},
 		[](int32 Index)
-	{
-	});
+		{
+		});
 }
 
 void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODIndex, int32 SectionIndex, const TSharedPtr<FRuntimeMeshAccessor>& MeshAccessor, const TSharedPtr<FRuntimeMeshIndicesAccessor>& TessellationIndicesAccessor)
@@ -314,27 +316,27 @@ void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODInd
 
 	GetStaticMeshSection(InMesh, LODIndex, SectionIndex, MeshAccessor->NumUVChannels(),
 		[&MeshAccessor](FVector Position, FVector TangentX, FVector TangentY, FVector TangentZ) -> int32
-	{
-		int32 NewIndex = MeshAccessor->AddVertex(Position);
-		MeshAccessor->SetTangents(NewIndex, TangentX, TangentY, TangentZ);
-		return NewIndex;
-	},
+		{
+			int32 NewIndex = MeshAccessor->AddVertex(Position);
+			MeshAccessor->SetTangents(NewIndex, TangentX, TangentY, TangentZ);
+			return NewIndex;
+		},
 		[&MeshAccessor](int32 Index, int32 UVIndex, FVector2D UV)
-	{
-		MeshAccessor->SetUV(Index, UVIndex, UV);
-	},
+		{
+			MeshAccessor->SetUV(Index, UVIndex, UV);
+		},
 		[&MeshAccessor](int32 Index, FColor Color)
-	{
-		MeshAccessor->SetColor(Index, Color);
-	},
+		{
+			MeshAccessor->SetColor(Index, Color);
+		},
 		[&MeshAccessor](int32 Index)
-	{
-		MeshAccessor->AddIndex(Index);
-	},
+		{
+			MeshAccessor->AddIndex(Index);
+		},
 		[&TessellationIndicesAccessor](int32 Index)
-	{
-		TessellationIndicesAccessor->AddIndex(Index);
-	});
+		{
+			TessellationIndicesAccessor->AddIndex(Index);
+		});
 }
 
 
@@ -358,38 +360,28 @@ void URuntimeMeshLibrary::CopyStaticMeshToRuntimeMesh(UStaticMeshComponent* Stat
 		for (int32 SectionIndex = 0; SectionIndex < NumSections; SectionIndex++)
 		{
 			// Buffers for copying geom data
-			TArray<FRuntimeMeshVertexSimple> Vertices;
-			TArray<int32> Triangles;
-			TArray<int32> AdjacencyTriangles;
+			TSharedPtr<FRuntimeMeshBuilder> MeshData = MakeRuntimeMeshBuilder<FRuntimeMeshTangents, FVector2DHalf, uint32>();
+			TArray<uint8> AdjacencyTrianglesData;
+			TSharedPtr<FRuntimeMeshIndicesAccessor> AdjacencyTrianglesAccessor = MakeShared<FRuntimeMeshIndicesAccessor>(true, &AdjacencyTrianglesData);
+			TArray<uint32> AdjacencyTriangles;
+			AdjacencyTriangles.SetNum(AdjacencyTrianglesData.Num() / 4);
+			FMemory::Memcpy(AdjacencyTriangles.GetData(), AdjacencyTrianglesData.GetData(), AdjacencyTrianglesData.Num());
+
 
 			// TODO: Make this smarter to setup a mesh section to match the static mesh vertex configuration
 			// This will let it pick up the additional UVs or high pri normals/tangents/uvs
 
 			// Get geom data from static mesh
-			GetStaticMeshSection(StaticMesh, LODIndex, SectionIndex, Vertices, Triangles, AdjacencyTriangles);
+			GetStaticMeshSection(StaticMesh, LODIndex, SectionIndex, MeshData, AdjacencyTrianglesAccessor);
 
 			// Create RuntimeMesh
-			RuntimeMesh->CreateMeshSection(SectionIndex, Vertices, Triangles, bCreateCollision);
+			RuntimeMesh->CreateMeshSection(SectionIndex, MeshData, bCreateCollision);
 			RuntimeMesh->SetSectionTessellationTriangles(SectionIndex, AdjacencyTriangles);
 		}
 
 		//// SIMPLE COLLISION
+		CopyCollisionFromStaticMesh(StaticMesh, RuntimeMesh);
 
-		// Clear any existing collision hulls
-		RuntimeMesh->ClearAllConvexCollisionSections();
-
-		if (StaticMesh->BodySetup != nullptr)
-		{
-			// Iterate over all convex hulls on static mesh..
-			const int32 NumConvex = StaticMesh->BodySetup->AggGeom.ConvexElems.Num();
-			for (int ConvexIndex = 0; ConvexIndex < NumConvex; ConvexIndex++)
-			{
-				// Copy convex verts
-				FKConvexElem& MeshConvex = StaticMesh->BodySetup->AggGeom.ConvexElems[ConvexIndex];
-
-				RuntimeMesh->AddConvexCollisionSection(MeshConvex.VertexData);
-			}
-		}
 
 		//// MATERIALS
 
@@ -404,6 +396,25 @@ void URuntimeMeshLibrary::CopyStaticMeshToRuntimeMesh(UStaticMeshComponent* Stat
 void URuntimeMeshLibrary::CopyStaticMeshToRuntimeMeshComponent(UStaticMeshComponent* StaticMeshComponent, int32 LODIndex, URuntimeMeshComponent* RuntimeMeshComponent, bool bCreateCollision)
 {
 	CopyStaticMeshToRuntimeMesh(StaticMeshComponent, LODIndex, RuntimeMeshComponent->GetOrCreateRuntimeMesh(), bCreateCollision);
+}
+
+void URuntimeMeshLibrary::CopyCollisionFromStaticMesh(UStaticMesh* StaticMesh, URuntimeMesh* RuntimeMesh)
+{
+	// Clear any existing collision hulls
+	RuntimeMesh->ClearAllConvexCollisionSections();
+
+	if (StaticMesh->BodySetup != nullptr)
+	{
+		// Iterate over all convex hulls on static mesh..
+		const int32 NumConvex = StaticMesh->BodySetup->AggGeom.ConvexElems.Num();
+		for (int ConvexIndex = 0; ConvexIndex < NumConvex; ConvexIndex++)
+		{
+			// Copy convex verts
+			FKConvexElem& MeshConvex = StaticMesh->BodySetup->AggGeom.ConvexElems[ConvexIndex];
+
+			RuntimeMesh->AddConvexCollisionSection(MeshConvex.VertexData);
+		}
+	}
 }
 
 void URuntimeMeshLibrary::CalculateTangentsForMesh(TFunction<int32(int32 Index)> IndexAccessor, TFunction<FVector(int32 Index)> VertexAccessor, TFunction<FVector2D(int32 Index)> UVAccessor,
@@ -659,7 +670,12 @@ void URuntimeMeshLibrary::GetStaticMeshSection(UStaticMesh* InMesh, int32 LODInd
 					uint32 MeshVertIndex = Indices[i];
 
 					// See if we have this vert already in our section vert buffer, and copy vert in if not 
+
+#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION >= 19
+					int32 SectionVertIndex = GetNewIndexForOldVertIndex(&LOD.VertexBuffers.PositionVertexBuffer, &LOD.VertexBuffers.StaticMeshVertexBuffer, &LOD.VertexBuffers.ColorVertexBuffer, MeshToSectionVertMap, MeshVertIndex, NumSupportedUVs, VertexCreator, UVSetter, ColorSetter);
+#else
 					int32 SectionVertIndex = GetNewIndexForOldVertIndex(&LOD.PositionVertexBuffer, &LOD.VertexBuffer, &LOD.ColorVertexBuffer, MeshToSectionVertMap, MeshVertIndex, NumSupportedUVs, VertexCreator, UVSetter, ColorSetter);
+#endif
 
 					// Add to index buffer
 					IndexCreator(SectionVertIndex);

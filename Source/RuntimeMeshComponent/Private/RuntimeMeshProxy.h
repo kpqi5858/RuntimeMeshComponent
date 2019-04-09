@@ -19,9 +19,9 @@ struct FRuntimeMeshRenderThreadDeleter
 		}
 		else
 		{
-			ENQUEUE_UNIQUE_RENDER_COMMAND_ONEPARAMETER(
-				FRuntimeMeshProxyDeleterCommand,
-				void*, Object, Object,
+			// HORU: 4.22 rendering
+			ENQUEUE_RENDER_COMMAND(FRuntimeMeshProxyDeleterCommand)(
+				[Object](FRHICommandListImmediate & RHICmdList)
 				{
 					delete static_cast<Type*>(Object);
 				}
@@ -35,11 +35,15 @@ struct FRuntimeMeshRenderThreadDeleter
  */
 class FRuntimeMeshProxy
 {
+	ERHIFeatureLevel::Type FeatureLevel;
+
 	TMap<int32, FRuntimeMeshSectionProxyPtr> Sections;
 
 public:
-	FRuntimeMeshProxy();
+	FRuntimeMeshProxy(ERHIFeatureLevel::Type InFeatureLevel);
 	~FRuntimeMeshProxy();
+
+	ERHIFeatureLevel::Type GetFeatureLevel() const { return FeatureLevel; }
 
 
 	void CreateSection_GameThread(int32 SectionId, const FRuntimeMeshSectionCreationParamsPtr& SectionData);

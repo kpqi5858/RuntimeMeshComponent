@@ -1,9 +1,12 @@
 // Copyright 2016-2018 Chris Conway (Koderz). All Rights Reserved.
 
+#include "RuntimeMeshComponentProxy.h"
 #include "RuntimeMeshComponentPlugin.h"
 #include "RuntimeMeshComponent.h"
-#include "RuntimeMeshComponentProxy.h"
+#include "RuntimeMeshProxy.h"
 #include "PhysicsEngine/BodySetup.h"
+#include "TessellationRendering.h"
+#include "PrimitiveSceneProxy.h"
 
 FRuntimeMeshComponentSceneProxy::FRuntimeMeshComponentSceneProxy(URuntimeMeshComponent* Component) 
 	: FPrimitiveSceneProxy(Component)
@@ -13,7 +16,7 @@ FRuntimeMeshComponentSceneProxy::FRuntimeMeshComponentSceneProxy(URuntimeMeshCom
 
 	check(Component->GetRuntimeMesh() != nullptr);
 
-	RuntimeMeshProxy = Component->GetRuntimeMesh()->EnsureProxyCreated();
+	RuntimeMeshProxy = Component->GetRuntimeMesh()->EnsureProxyCreated(GetScene().GetFeatureLevel());
 
 	// Setup our material map
 
@@ -85,8 +88,8 @@ void FRuntimeMeshComponentSceneProxy::CreateMeshBatch(FMeshBatch& MeshBatch, con
 	MeshBatch.ReverseCulling = IsLocalToWorldDeterminantNegative();
 	MeshBatch.bCanApplyViewModeOverrides = true;
 
-	FMeshBatchElement& BatchElement = MeshBatch.Elements[0];
-	BatchElement.PrimitiveUniformBufferResource = &GetUniformBuffer();
+	//HORU: 4.22 compat
+	//FMeshBatchElement& BatchElement = MeshBatch.Elements[0];
 }
 
 void FRuntimeMeshComponentSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInterface* PDI)
@@ -97,7 +100,7 @@ void FRuntimeMeshComponentSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInt
 		if (SectionRenderData.Contains(SectionEntry.Key) && Section.IsValid() && Section->ShouldRender() && Section->WantsToRenderInStaticPath())
 		{
 			const FRuntimeMeshSectionRenderData& RenderData = SectionRenderData[SectionEntry.Key];
-			FMaterialRenderProxy* Material = RenderData.Material->GetRenderProxy(false);
+			FMaterialRenderProxy* Material = RenderData.Material->GetRenderProxy();
 
 			FMeshBatch MeshBatch;
 			CreateMeshBatch(MeshBatch, Section, RenderData, Material, nullptr);
@@ -115,7 +118,7 @@ void FRuntimeMeshComponentSceneProxy::GetDynamicMeshElements(const TArray<const 
 	if (bWireframe)
 	{
 		WireframeMaterialInstance = new FColoredMaterialRenderProxy(
-			GEngine->WireframeMaterial ? GEngine->WireframeMaterial->GetRenderProxy(IsSelected()) : nullptr,
+			GEngine->WireframeMaterial ? GEngine->WireframeMaterial->GetRenderProxy() : nullptr,
 			FLinearColor(0, 0.5f, 1.f)
 		);
 
@@ -138,7 +141,7 @@ void FRuntimeMeshComponentSceneProxy::GetDynamicMeshElements(const TArray<const 
 					if (bForceDynamicPath || !Section->WantsToRenderInStaticPath())
 					{
 						const FRuntimeMeshSectionRenderData& RenderData = SectionRenderData[SectionEntry.Key];
-						FMaterialRenderProxy* Material = RenderData.Material->GetRenderProxy(IsSelected());
+						FMaterialRenderProxy* Material = RenderData.Material->GetRenderProxy();
 
 						FMeshBatch& MeshBatch = Collector.AllocateMesh();
 						CreateMeshBatch(MeshBatch, Section, RenderData, Material, WireframeMaterialInstance);

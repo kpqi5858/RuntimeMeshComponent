@@ -3,6 +3,7 @@
 #pragma once
 
 #include "RuntimeMeshCore.h"
+#include "Containers/StaticArray.h"
 
 //////////////////////////////////////////////////////////////////////////
 //	
@@ -82,12 +83,12 @@ struct RuntimeMeshNormalUtil
 {
 	static void SetNormalW(FPackedNormal& Target, float Determinant)
 	{
-		Target.Vector.W = Determinant < 0.0f ? 0 : 255;
+		Target.Vector.W = Determinant < 0.0f ? 0 : -1; // -1 == 0xFF
 	}
 
 	static void SetNormalW(FPackedRGBA16N& Target, float Determinant)
 	{
-		Target.W = Determinant < 0.0f ? 0 : 65535;
+		Target.W = Determinant < 0.0f ? 0 : -1; // -1 == 0xFFFF
 	}
 };
 
@@ -736,3 +737,96 @@ __DECLARE_RUNTIME_MESH_VERTEXINTERNAL(FRuntimeMeshVertexNoPositionHiPrecisionNor
 
 /** Simple vertex with 2 UV channels and NO position component (Meant to be used with separate position buffer) */
 __DECLARE_RUNTIME_MESH_VERTEXINTERNAL(FRuntimeMeshVertexNoPositionDualUVHiPrecisionNormals, false, true, true, true, 2, ERuntimeMeshVertexTangentBasisType::HighPrecision, ERuntimeMeshVertexUVType::HighPrecision, RUNTIMEMESHCOMPONENT_API)
+
+
+
+
+
+struct FRuntimeMeshTangents
+{
+	FPackedNormal Tangent;
+	FPackedNormal Normal;
+};
+
+struct FRuntimeMeshTangentsHighPrecision
+{
+	FPackedRGBA16N Tangent;
+	FPackedRGBA16N Normal;
+};
+
+struct FRuntimeMeshDualUV
+{
+	FVector2DHalf UV0;
+	FVector2DHalf UV1;
+
+	FVector2DHalf& operator[] (int32 Index) 
+	{
+		return Index > 0 ? UV1 : UV0;
+	}
+};
+struct FRuntimeMeshDualUVHighPrecision
+{
+	FVector2D UV0;
+	FVector2D UV1;
+
+	FVector2D& operator[] (int32 Index)
+	{
+		return Index > 0 ? UV1 : UV0;
+	}
+};
+
+
+template<typename VertexType>
+inline bool GetTangentIsHighPrecision()
+{
+	static_assert(sizeof(VertexType) == -1, "Invalid Tangent type.");
+}
+
+template<>
+inline bool GetTangentIsHighPrecision<FRuntimeMeshTangents>()
+{
+	return false;
+}
+
+template<>
+inline bool GetTangentIsHighPrecision<FRuntimeMeshTangentsHighPrecision>()
+{
+	return true;
+}
+
+template<typename VertexType>
+inline void GetUVVertexProperties(bool& bIsUsingHighPrecision, int32& NumUVs)
+{
+	static_assert(sizeof(VertexType) == -1, "Invalid UV type.");
+}
+
+template<>
+inline void GetUVVertexProperties<FVector2DHalf>(bool& bIsUsingHighPrecision, int32& NumUVs)
+{
+	bIsUsingHighPrecision = false;
+	NumUVs = 1;
+}
+
+template<>
+inline void GetUVVertexProperties<FVector2D>(bool& bIsUsingHighPrecision, int32& NumUVs)
+{
+	bIsUsingHighPrecision = true;
+	NumUVs = 1;
+}
+
+template<>
+inline void GetUVVertexProperties<FRuntimeMeshDualUV>(bool& bIsUsingHighPrecision, int32& NumUVs)
+{
+	bIsUsingHighPrecision = false;
+	NumUVs = 2;
+}
+
+template<>
+inline void GetUVVertexProperties<FRuntimeMeshDualUVHighPrecision>(bool& bIsUsingHighPrecision, int32& NumUVs)
+{
+	bIsUsingHighPrecision = true;
+	NumUVs = 2;
+}
+
+
+
