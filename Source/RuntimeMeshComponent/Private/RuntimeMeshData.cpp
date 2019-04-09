@@ -1114,6 +1114,11 @@ void FRuntimeMeshData::CreateSectionInternal(int32 SectionId, ESectionUpdateFlag
 	check(DoesSectionExist(SectionId));
 	FRuntimeMeshSectionPtr Section = MeshSections[SectionId];
 
+	// Do any additional processing on the section for this update.
+	ERuntimeMeshBuffersToUpdate BuffersToUpdate; // This is ignored for creation as all buffers are updated.
+	HandleCommonSectionUpdateFlags(SectionId, UpdateFlags, BuffersToUpdate);
+
+
 	// Send section creation to render thread
 	if (RenderProxy.IsValid())
 	{
@@ -1123,9 +1128,6 @@ void FRuntimeMeshData::CreateSectionInternal(int32 SectionId, ESectionUpdateFlag
 	// Update the combined local bounds		
 	UpdateLocalBounds();
 
-	// Do any additional processing on the section for this update.
-	ERuntimeMeshBuffersToUpdate BuffersToUpdate; // This is ignored for creation as all buffers are updated.
-	HandleCommonSectionUpdateFlags(SectionId, UpdateFlags, BuffersToUpdate);
 
 
 	// Send the section creation notification to all linked RMC's
